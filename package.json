@@ -1,0 +1,15 @@
+{
+  "name": "ph-red-flag-detector-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Manifest V3 Chrome extension for advisory Messenger red-flag detection.",
+  "scripts": {
+    "test": "node --test",
+    "build": "node scripts/validate-extension.js",
+    "validate": "npm run test && npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
