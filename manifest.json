@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "PH Red Flag Detector for Messenger",
+  "short_name": "Red Flag Detector",
+  "version": "0.1.0",
+  "description": "Advisory red-flag detection for recent Messenger conversation windows.",
+  "action": {
+    "default_title": "PH Red Flag Detector",
+    "default_popup": "src/popup/popup.html"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["https://jerbenjems-ph-redflag-detector-api.hf.space/*"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.messenger.com/*", "https://www.facebook.com/messages/*"],
+      "js": ["src/content/messenger-content.js"],
+      "css": ["src/content/messenger-content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/content/messenger-controller.js", "src/shared/*.js"],
+      "matches": ["https://www.messenger.com/*", "https://www.facebook.com/*"]
+    }
+  ]
+}
