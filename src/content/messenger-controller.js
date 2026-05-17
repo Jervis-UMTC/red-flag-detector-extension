@@ -358,6 +358,10 @@ class MessengerDetectorApp {
     try {
       const settings = await loadSettings();
       this.state.retrievalMessageCount = settings.messageRetrievalCount;
+      if (!settings.consentAccepted) {
+        this.state.awaitingConsent = true;
+        this.state.status = "Consent";
+      }
     } catch {
       this.state.retrievalMessageCount = DEFAULT_RETRIEVAL_MESSAGE_COUNT;
     }
@@ -498,7 +502,14 @@ class MessengerDetectorApp {
   async acceptConsentAndAnalyze() {
     const settings = await loadSettings();
     await saveSettings({ ...settings, consentAccepted: true });
-    const messages = this.pendingMessages || [];
+    
+    if (!this.pendingMessages) {
+      // User accepted before clicking analyze, just show the normal view.
+      this.setState({ awaitingConsent: false, status: "Ready" });
+      return;
+    }
+
+    const messages = this.pendingMessages;
     this.pendingMessages = null;
 
     if (settings.showPreviewBeforeSending) {
@@ -532,12 +543,20 @@ class MessengerDetectorApp {
     }
   }
 
-  cancelPendingFlow() {
+  async cancelPendingFlow() {
     this.pendingMessages = null;
+    let consentAccepted = false;
+    try {
+      const settings = await loadSettings();
+      consentAccepted = settings.consentAccepted;
+    } catch {
+      consentAccepted = false;
+    }
+
     this.setState({
       busy: false,
-      status: "Ready",
-      awaitingConsent: false,
+      status: consentAccepted ? "Ready" : "Consent",
+      awaitingConsent: !consentAccepted,
       previewMessages: null,
       previewSelectedIndexes: [],
       previewExpanded: false,
@@ -637,11 +656,28 @@ function createResultView(result) {
 function createConsentView(onContinue, onCancel) {
   const wrapper = document.createElement("div");
   wrapper.className = "rfd-consent";
-  wrapper.append(createTextElement("p", "Send the latest visible messages to the configured API for analysis?", "rfd-message"));
+  
+  wrapper.append(createTextElement("p", "Before using the Red Flag Detector, please review and accept our Privacy Policy (available in the extension popup).", "rfd-message"));
+  
+  const privacyNote = document.createElement("p");
+  privacyNote.className = "rfd-message";
+  privacyNote.style.fontSize = "12px";
+  privacyNote.style.color = "var(--muted)";
+  
+  const strongText = document.createElement("strong");
+  strongText.textContent = "only";
+  
+  privacyNote.append(
+    document.createTextNode("We process your chat context locally and through our API "),
+    strongText,
+    document.createTextNode(" when you click 'Analyze'. We do not store your data.")
+  );
+  
+  wrapper.append(privacyNote);
 
   const actions = document.createElement("div");
   actions.className = "rfd-inline-actions";
-  actions.append(createButton("Continue", "primary", onContinue));
+  actions.append(createButton("Accept & Continue", "primary", onContinue));
   actions.append(createButton("Cancel", "secondary", onCancel));
   wrapper.append(actions);
 
