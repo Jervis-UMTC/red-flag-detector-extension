@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  buildMessageWindows,
   buildPredictionPayload,
   cleanMessageText,
   normalizeFormatterMode,
   normalizeLanguageMix,
   normalizeMessages,
+  normalizeRetrievalMessageCount,
 } from "../src/shared/normalization.js";
 
 test("normalizeLanguageMix accepts known language mixes", () => {
@@ -34,6 +34,18 @@ test("normalizeFormatterMode falls back to auto for unknown values", () => {
   assert.equal(normalizeFormatterMode(undefined), "auto");
 });
 
+test("normalizeRetrievalMessageCount accepts supported retrieval counts", () => {
+  assert.equal(normalizeRetrievalMessageCount(5), 5);
+  assert.equal(normalizeRetrievalMessageCount("10"), 10);
+  assert.equal(normalizeRetrievalMessageCount(20), 20);
+});
+
+test("normalizeRetrievalMessageCount falls back for unsupported retrieval counts", () => {
+  assert.equal(normalizeRetrievalMessageCount(7), 20);
+  assert.equal(normalizeRetrievalMessageCount("all"), 20);
+  assert.equal(normalizeRetrievalMessageCount(undefined), 20);
+});
+
 test("cleanMessageText trims, collapses whitespace, and truncates long text", () => {
   const long = `  hello\n\nthere   ${"x".repeat(2000)}  `;
   const cleaned = cleanMessageText(long, { maxLength: 24 });
@@ -42,26 +54,17 @@ test("cleanMessageText trims, collapses whitespace, and truncates long text", ()
   assert.equal(cleaned.length, 24);
 });
 
-test("normalizeMessages ignores empty text and keeps the latest six", () => {
-  const messages = [
-    { speaker: "A", text: "first" },
-    { speaker: "B", text: "" },
-    { speaker: "B", text: "second" },
-    { speaker: "A", text: "third" },
-    { speaker: "B", text: "fourth" },
-    { speaker: "A", text: "fifth" },
-    { speaker: "B", text: "sixth" },
-    { speaker: "A", text: "seventh" },
-  ];
+test("normalizeMessages ignores empty text and keeps up to the full context limit by default", () => {
+  const messages = Array.from({ length: 22 }, (_value, index) => ({
+    speaker: index % 2 === 0 ? "A" : "B",
+    text: index === 1 ? "" : `message ${index + 1}`,
+  }));
 
-  assert.deepEqual(normalizeMessages(messages), [
-    { speaker: "B", text: "second" },
-    { speaker: "A", text: "third" },
-    { speaker: "B", text: "fourth" },
-    { speaker: "A", text: "fifth" },
-    { speaker: "B", text: "sixth" },
-    { speaker: "A", text: "seventh" },
-  ]);
+  const normalized = normalizeMessages(messages);
+
+  assert.equal(normalized.length, 20);
+  assert.equal(normalized[0].text, "message 3");
+  assert.equal(normalized.at(-1).text, "message 22");
 });
 
 test("normalizeMessages maps outgoing messages to speaker A and incoming messages to speaker B", () => {
@@ -98,61 +101,17 @@ test("buildPredictionPayload returns an API-ready request body", () => {
   });
 });
 
-test("buildPredictionPayload keeps the latest eighteen messages for API-side windowing", () => {
+test("buildPredictionPayload keeps up to twenty selected context messages", () => {
   const payload = buildPredictionPayload({
     languageMix: "bislish",
     formatterMode: "auto",
-    messages: Array.from({ length: 20 }, (_, index) => ({
+    messages: Array.from({ length: 22 }, (_, index) => ({
       speaker: index % 2 === 0 ? "A" : "B",
       text: `message ${index + 1}`,
     })),
   });
 
-  assert.equal(payload.messages.length, 18);
+  assert.equal(payload.messages.length, 20);
   assert.equal(payload.messages[0].text, "message 3");
-  assert.equal(payload.messages.at(-1).text, "message 20");
-});
-
-test("buildMessageWindows creates overlapping API-sized windows and includes the latest window", () => {
-  const messages = Array.from({ length: 10 }, (_, index) => ({
-    speaker: index % 2 === 0 ? "A" : "B",
-    text: `message ${index + 1}`,
-  }));
-
-  const windows = buildMessageWindows(messages, { windowSize: 6, stride: 3, maxMessages: 18 });
-
-  assert.deepEqual(
-    windows.map((window) => window.map((message) => message.text)),
-    [
-      ["message 1", "message 2", "message 3", "message 4", "message 5", "message 6"],
-      ["message 4", "message 5", "message 6", "message 7", "message 8", "message 9"],
-      ["message 5", "message 6", "message 7", "message 8", "message 9", "message 10"],
-    ]
-  );
-});
-
-test("buildMessageWindows keeps only the latest configured scan range", () => {
-  const messages = Array.from({ length: 20 }, (_, index) => ({
-    speaker: "A",
-    text: `message ${index + 1}`,
-  }));
-
-  const windows = buildMessageWindows(messages, { windowSize: 6, stride: 3, maxMessages: 9 });
-
-  assert.deepEqual(windows[0].map((message) => message.text), [
-    "message 12",
-    "message 13",
-    "message 14",
-    "message 15",
-    "message 16",
-    "message 17",
-  ]);
-  assert.deepEqual(windows.at(-1).map((message) => message.text), [
-    "message 15",
-    "message 16",
-    "message 17",
-    "message 18",
-    "message 19",
-    "message 20",
-  ]);
+  assert.equal(payload.messages.at(-1).text, "message 22");
 });

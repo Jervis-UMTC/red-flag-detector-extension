@@ -19,11 +19,11 @@ export const SUPPORTED_FORMATTER_MODES = Object.freeze([
   "google_llm",
 ]);
 
-export const MAX_MESSAGES = 6;
-export const MAX_ANALYSIS_MESSAGES = 18;
+export const MAX_ANALYSIS_MESSAGES = 20;
 export const MAX_MESSAGE_TEXT_LENGTH = 800;
 export const REQUEST_TIMEOUT_MS = 20000;
-export const WINDOW_STRIDE = 3;
+export const SUPPORTED_RETRIEVAL_MESSAGE_COUNTS = Object.freeze([5, 10, 20]);
+export const DEFAULT_RETRIEVAL_MESSAGE_COUNT = 20;
 
 export const MESSAGE_TYPES = Object.freeze({
   CLASSIFY_CONVERSATION: "PH_RED_FLAG_CLASSIFY_CONVERSATION",
@@ -37,6 +37,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   languageMix: DEFAULT_LANGUAGE_MIX,
   formatterMode: DEFAULT_FORMATTER_MODE,
   showPreviewBeforeSending: false,
+  messageRetrievalCount: DEFAULT_RETRIEVAL_MESSAGE_COUNT,
   consentAccepted: false,
 });
 

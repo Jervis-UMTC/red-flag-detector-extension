@@ -1,16 +1,17 @@
 import {
   DEFAULT_FORMATTER_MODE,
   DEFAULT_LANGUAGE_MIX,
+  DEFAULT_RETRIEVAL_MESSAGE_COUNT,
   MAX_ANALYSIS_MESSAGES,
-  MAX_MESSAGES,
   MAX_MESSAGE_TEXT_LENGTH,
   SUPPORTED_FORMATTER_MODES,
   SUPPORTED_LANGUAGE_MIXES,
-  WINDOW_STRIDE,
+  SUPPORTED_RETRIEVAL_MESSAGE_COUNTS,
 } from "./constants.js";
 
 const SUPPORTED_LANGUAGE_MIX_SET = new Set(SUPPORTED_LANGUAGE_MIXES);
 const SUPPORTED_FORMATTER_MODE_SET = new Set(SUPPORTED_FORMATTER_MODES);
+const SUPPORTED_RETRIEVAL_MESSAGE_COUNT_SET = new Set(SUPPORTED_RETRIEVAL_MESSAGE_COUNTS);
 
 export function normalizeLanguageMix(languageMix) {
   const normalized = String(languageMix ?? "")
@@ -26,6 +27,13 @@ export function normalizeFormatterMode(formatterMode) {
     .toLowerCase();
 
   return SUPPORTED_FORMATTER_MODE_SET.has(normalized) ? normalized : DEFAULT_FORMATTER_MODE;
+}
+
+export function normalizeRetrievalMessageCount(value) {
+  const count = Number(value);
+  return Number.isInteger(count) && SUPPORTED_RETRIEVAL_MESSAGE_COUNT_SET.has(count)
+    ? count
+    : DEFAULT_RETRIEVAL_MESSAGE_COUNT;
 }
 
 export function cleanMessageText(text, options = {}) {
@@ -50,7 +58,7 @@ export function normalizeSpeaker(message) {
 }
 
 export function normalizeMessages(messages, options = {}) {
-  const maxMessages = Math.max(1, options.maxMessages ?? MAX_MESSAGES);
+  const maxMessages = Math.max(1, options.maxMessages ?? MAX_ANALYSIS_MESSAGES);
   const maxTextLength = Math.max(1, options.maxTextLength ?? MAX_MESSAGE_TEXT_LENGTH);
 
   return Array.isArray(messages)
@@ -86,32 +94,4 @@ export function buildPredictionPayload({
   }
 
   return payload;
-}
-
-export function buildMessageWindows(messages, options = {}) {
-  const windowSize = Math.max(1, options.windowSize ?? MAX_MESSAGES);
-  const stride = Math.max(1, options.stride ?? WINDOW_STRIDE);
-  const maxMessages = Math.max(windowSize, options.maxMessages ?? MAX_ANALYSIS_MESSAGES);
-  const normalizedMessages = normalizeMessages(messages, { maxMessages });
-
-  if (normalizedMessages.length === 0) {
-    return [];
-  }
-
-  if (normalizedMessages.length <= windowSize) {
-    return [normalizedMessages];
-  }
-
-  const lastStart = normalizedMessages.length - windowSize;
-  const starts = [];
-
-  for (let start = 0; start <= lastStart; start += stride) {
-    starts.push(start);
-  }
-
-  if (starts.at(-1) !== lastStart) {
-    starts.push(lastStart);
-  }
-
-  return starts.map((start) => normalizedMessages.slice(start, start + windowSize));
 }

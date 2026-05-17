@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   checkApiHealth,
   classifyConversation,
-  classifyConversationWindows,
   resolveEndpointUrl,
   validateApiBaseUrl,
 } from "../src/shared/api-client.js";
@@ -97,7 +96,7 @@ test("classifyConversation posts normalized payload without credentials", async 
   assert.equal(result.risk_policy, "high");
 });
 
-test("classifyConversation posts up to eighteen messages for API-side windowing", async () => {
+test("classifyConversation posts the full selected context in one request", async () => {
   let payload;
   const fetchImpl = async (_url, options) => {
     payload = JSON.parse(options.body);
@@ -113,7 +112,7 @@ test("classifyConversation posts up to eighteen messages for API-side windowing"
     apiUrl: "https://example.test",
     languageMix: "bislish",
     formatterMode: "auto",
-    messages: Array.from({ length: 20 }, (_, index) => ({
+    messages: Array.from({ length: 22 }, (_, index) => ({
       speaker: index % 2 === 0 ? "A" : "B",
       text: `message ${index + 1}`,
     })),
@@ -121,9 +120,9 @@ test("classifyConversation posts up to eighteen messages for API-side windowing"
   });
 
   assert.equal(payload.formatter_mode, "auto");
-  assert.equal(payload.messages.length, 18);
+  assert.equal(payload.messages.length, 20);
   assert.equal(payload.messages[0].text, "message 3");
-  assert.equal(payload.messages.at(-1).text, "message 20");
+  assert.equal(payload.messages.at(-1).text, "message 22");
 });
 
 test("classifyConversation requires at least one message", async () => {
@@ -138,56 +137,12 @@ test("classifyConversation requires at least one message", async () => {
   );
 });
 
-test("classifyConversationWindows scans overlapping windows and returns the highest red risk", async () => {
-  const calls = [];
-  const fetchImpl = async (_url, options) => {
-    const payload = JSON.parse(options.body);
-    calls.push(payload.messages.map((message) => message.text));
-
-    const containsRiskyWindow = payload.messages.some((message) => message.text === "message 8");
-    return jsonResponse({
-      label: containsRiskyWindow ? "red_flag" : "green_flag",
-      confidence: containsRiskyWindow ? 0.88 : 0.93,
-      risk_level: containsRiskyWindow ? "high" : "low",
-      explanation: containsRiskyWindow ? "Possible red-flag content." : "No red flag detected.",
-      language_mix: "bislish",
-      message_count_used: payload.messages.length,
-      probabilities: containsRiskyWindow
-        ? { green_flag: 0.12, red_flag: 0.88 }
-        : { green_flag: 0.93, red_flag: 0.07 },
-      latency_seconds: 0.1,
-    });
-  };
-
-  const result = await classifyConversationWindows({
-    apiUrl: "https://example.test",
-    languageMix: "bislish",
-    messages: Array.from({ length: 10 }, (_, index) => ({
-      speaker: index % 2 === 0 ? "A" : "B",
-      text: `message ${index + 1}`,
-    })),
-    fetchImpl,
-  });
-
-  assert.equal(calls.length, 3);
-  assert.equal(result.label, "red_flag");
-  assert.equal(result.confidence, 0.88);
-  assert.equal(result.scan_count, 3);
-  assert.equal(result.window_index, 2);
-  assert.deepEqual(calls.at(-1), [
-    "message 5",
-    "message 6",
-    "message 7",
-    "message 8",
-    "message 9",
-    "message 10",
-  ]);
-});
-
-test("classifyConversationWindows uses one request for six or fewer messages", async () => {
+test("classifyConversation sends twenty context messages in one request", async () => {
   let requestCount = 0;
-  const fetchImpl = async () => {
+  let payload;
+  const fetchImpl = async (_url, options) => {
     requestCount += 1;
+    payload = JSON.parse(options.body);
     return jsonResponse({
       label: "green_flag",
       confidence: 0.94,
@@ -196,15 +151,20 @@ test("classifyConversationWindows uses one request for six or fewer messages", a
     });
   };
 
-  const result = await classifyConversationWindows({
+  await classifyConversation({
     apiUrl: "https://example.test",
     languageMix: "bislish",
-    messages: [{ speaker: "A", text: "hello" }],
+    messages: Array.from({ length: 20 }, (_value, index) => ({
+      speaker: index % 2 === 0 ? "A" : "B",
+      text: `message ${index + 1}`,
+    })),
     fetchImpl,
   });
 
   assert.equal(requestCount, 1);
-  assert.equal(result.scan_count, 1);
+  assert.equal(payload.messages.length, 20);
+  assert.equal(payload.messages[0].text, "message 1");
+  assert.equal(payload.messages.at(-1).text, "message 20");
 });
 
 test("classifyConversation explains 404 API errors as URL configuration problems", async () => {

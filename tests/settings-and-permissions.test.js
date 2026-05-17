@@ -27,8 +27,15 @@ test("normalizeSettings keeps conservative defaults", () => {
     languageMix: "tagalog_bisaya_english",
     formatterMode: "auto",
     showPreviewBeforeSending: false,
+    messageRetrievalCount: 20,
     consentAccepted: false,
   });
+});
+
+test("normalizeSettings keeps supported retrieval count choices", () => {
+  assert.equal(normalizeSettings({ messageRetrievalCount: 5 }).messageRetrievalCount, 5);
+  assert.equal(normalizeSettings({ messageRetrievalCount: "10" }).messageRetrievalCount, 10);
+  assert.equal(normalizeSettings({ messageRetrievalCount: 7 }).messageRetrievalCount, 20);
 });
 
 test("normalizeSettings keeps a supported formatter mode", () => {

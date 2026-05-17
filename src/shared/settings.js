@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS } from "./constants.js";
-import { normalizeFormatterMode, normalizeLanguageMix } from "./normalization.js";
+import { normalizeFormatterMode, normalizeLanguageMix, normalizeRetrievalMessageCount } from "./normalization.js";
 import { normalizeApiBaseUrl } from "./api-client.js";
 
 const STORAGE_KEY = "phRedFlagDetectorSettings";
@@ -30,6 +30,7 @@ export function normalizeSettings(settings = {}) {
     languageMix: normalizeLanguageMix(settings.languageMix),
     formatterMode: normalizeFormatterMode(settings.formatterMode),
     showPreviewBeforeSending: settings.showPreviewBeforeSending === true,
+    messageRetrievalCount: normalizeRetrievalMessageCount(settings.messageRetrievalCount),
     consentAccepted: settings.consentAccepted === true,
   };
 }

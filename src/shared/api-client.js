@@ -1,5 +1,5 @@
 import { REQUEST_TIMEOUT_MS } from "./constants.js";
-import { buildMessageWindows, buildPredictionPayload } from "./normalization.js";
+import { buildPredictionPayload } from "./normalization.js";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const KNOWN_ENDPOINTS = new Set(["health", "predict"]);
@@ -86,45 +86,6 @@ export async function classifyConversation({
   });
 
   return normalizePredictionResponse(responseBody);
-}
-
-export async function classifyConversationWindows({
-  apiUrl,
-  languageMix,
-  formatterMode,
-  messages,
-  fetchImpl = globalThis.fetch,
-  timeoutMs = REQUEST_TIMEOUT_MS,
-}) {
-  const windows = buildMessageWindows(messages);
-
-  if (windows.length === 0) {
-    throw new RedFlagApiError("No readable messages found in the current conversation.", "NO_MESSAGES");
-  }
-
-  const results = [];
-
-  for (const [index, windowMessages] of windows.entries()) {
-    const result = await classifyConversation({
-      apiUrl,
-      languageMix,
-      formatterMode,
-      messages: windowMessages,
-      fetchImpl,
-      timeoutMs,
-    });
-
-    results.push({
-      ...result,
-      scan_count: windows.length,
-      window_index: index + 1,
-      message_count_scanned: messages.length,
-    });
-  }
-
-  return results.reduce((best, current) =>
-    redRiskScore(current) > redRiskScore(best) ? current : best
-  );
 }
 
 export async function checkApiHealth({
@@ -292,20 +253,6 @@ function removeKnownEndpointSuffix(url) {
   }
 
   url.pathname = pathSegments.length > 0 ? `/${pathSegments.join("/")}` : "/";
-}
-
-function redRiskScore(result) {
-  const redProbability = Number(result?.probabilities?.red_flag);
-  if (Number.isFinite(redProbability)) {
-    return redProbability;
-  }
-
-  const confidence = Number(result?.confidence);
-  if (!Number.isFinite(confidence)) {
-    return 0;
-  }
-
-  return result?.label === "red_flag" ? confidence : 1 - confidence;
 }
 
 function createTimeoutSignal(timeoutMs) {
