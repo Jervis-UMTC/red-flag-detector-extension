@@ -1,4 +1,4 @@
-export const DEFAULT_API_BASE_URL = "https://jerbenjamess-ph-binary-redflag-xlmroberta.hf.space";
+export const DEFAULT_API_BASE_URL = "https://jerbenjems-ph-redflag-detector-api.hf.space";
 
 export const DEFAULT_LANGUAGE_MIX = "tagalog_bisaya_english";
 export const DEFAULT_FORMATTER_MODE = "auto";
