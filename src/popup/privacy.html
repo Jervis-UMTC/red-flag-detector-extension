@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Privacy Policy - PH Red Flag Detector</title>
+    <link rel="stylesheet" href="./popup.css">
+    <style>
+      .privacy-container {
+        padding: 0 16px 16px 16px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text-primary);
+        max-height: 400px;
+        overflow-y: auto;
+      }
+      .privacy-container h2 {
+        font-size: 16px;
+        margin-top: 16px;
+        margin-bottom: 8px;
+        color: var(--text-primary);
+      }
+      .privacy-container h3 {
+        font-size: 14px;
+        margin-top: 12px;
+        margin-bottom: 4px;
+        color: var(--text-primary);
+      }
+      .privacy-container ul {
+        padding-left: 20px;
+        margin: 8px 0;
+      }
+      .privacy-container p {
+        margin: 8px 0;
+      }
+      .back-button-container {
+        padding: 16px;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        justify-content: flex-start;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="popup-shell">
+      <header class="popup-header">
+        <div>
+          <h1>Privacy Policy</h1>
+        </div>
+        <span class="flag-mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
+            <line x1="4" y1="22" x2="4" y2="15"></line>
+          </svg>
+        </span>
+      </header>
+
+      <div class="privacy-container">
+        <p>This extension treats all Messenger text as highly sensitive and complies with the <strong>Philippine Data Privacy Act of 2012 (Republic Act No. 10173)</strong>.</p>
+        
+        <h3>Data Collection and Usage</h3>
+        <ul>
+          <li><strong>What is collected:</strong> Only the visible chat context (up to 20 messages) currently on your screen is extracted.</li>
+          <li><strong>How it is used:</strong> The text is temporarily sent to the configured API for the sole purpose of running the red-flag detection model.</li>
+          <li><strong>Data Storage:</strong> Raw message text is <strong>never</strong> saved to your local browser storage or persisted by the default API backend. It is processed in memory and immediately discarded after the prediction is returned.</li>
+        </ul>
+
+        <h3>User Consent</h3>
+        <ul>
+          <li><strong>Mandatory Acceptance:</strong> You must explicitly consent to the privacy policy upon opening the extension for the first time.</li>
+          <li><strong>Manual Scanning:</strong> Analysis is entirely manual. The extension only sends data when you explicitly click the "Analyze" button on a conversation window.</li>
+        </ul>
+
+        <p><em>Disclaimer: The results are advisory model outputs intended for personal guidance. They do not constitute proof of harm or professional legal/psychological advice.</em></p>
+      </div>
+
+      <div class="back-button-container">
+        <button id="backButton" type="button" class="button button-secondary">Back</button>
+      </div>
+    </main>
+
+    <script type="module" src="./privacy.js"></script>
+  </body>
+</html>
