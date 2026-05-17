@@ -1,6 +1,6 @@
 import { DEFAULT_SETTINGS } from "./constants.js";
 import { normalizeFormatterMode, normalizeLanguageMix } from "./normalization.js";
-import { validateApiBaseUrl } from "./api-client.js";
+import { normalizeApiBaseUrl } from "./api-client.js";
 
 const STORAGE_KEY = "phRedFlagDetectorSettings";
 
@@ -35,9 +35,7 @@ export function normalizeSettings(settings = {}) {
 }
 
 export function normalizeApiBaseHref(apiUrl) {
-  const url = validateApiBaseUrl(apiUrl);
-  url.search = "";
-  url.hash = "";
+  const url = normalizeApiBaseUrl(apiUrl);
   return url.href.replace(/\/+$/g, "");
 }
 

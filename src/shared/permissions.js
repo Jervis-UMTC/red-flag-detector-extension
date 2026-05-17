@@ -1,7 +1,7 @@
-import { validateApiBaseUrl } from "./api-client.js";
+import { normalizeApiBaseUrl } from "./api-client.js";
 
 export function hostPermissionPatternForApiUrl(apiUrl) {
-  const url = validateApiBaseUrl(apiUrl);
+  const url = normalizeApiBaseUrl(apiUrl);
   const hostname = url.hostname === "::1" ? "[::1]" : url.hostname;
   return `${url.protocol}//${hostname}/*`;
 }
