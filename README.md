@@ -54,17 +54,21 @@ Open the extension popup to configure:
 
 If a custom API host is configured, Chrome asks for host permission for that API origin.
 
-## Privacy And Safety
+## Privacy Policy
 
-This extension treats Messenger text as sensitive.
+This extension treats all Messenger text as highly sensitive and complies with the **Philippine Data Privacy Act of 2012 (Republic Act No. 10173)**.
 
-- Analysis is manual by default.
-- The first scan asks for consent unless consent is already enabled in the popup.
-- Raw message text is sent only to the configured API when Analyze is clicked.
+### Data Collection and Usage
+- **What is collected:** Only the visible chat context (up to 20 messages) currently on your screen is extracted.
+- **How it is used:** The text is temporarily sent to the configured API for the sole purpose of running the red-flag detection model.
+- **Data Storage:** Raw message text is **never** saved to your local browser storage or persisted by the default API backend. It is processed in memory and immediately discarded after the prediction is returned.
+- **Service Worker:** The extension sends network requests with `credentials: "omit"`, ensuring no cookies or session data are attached.
 
-- Raw message text is not persisted in Chrome storage.
-- The service worker sends requests with `credentials: "omit"`.
-- Results are advisory model output, not proof or professional advice.
+### User Consent
+- **Mandatory Acceptance:** You must explicitly consent to the privacy policy upon opening the extension for the first time. The extension will remain disabled until consent is granted.
+- **Manual Scanning:** Analysis is entirely manual. The extension only sends data when you explicitly click the "Analyze" button on a conversation window.
+
+> **Disclaimer:** The results are advisory model outputs intended for personal guidance. They do not constitute proof of harm or professional legal/psychological advice.
 
 ## Development
 
