@@ -69,6 +69,48 @@ h1 {
   box-shadow: 0 2px 4px rgba(220, 38, 38, 0.05);
 }
 
+.consent-gate {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.02);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.consent-content h2 {
+  font-size: 16px;
+  margin: 0 0 8px 0;
+}
+
+.consent-content p {
+  color: var(--muted);
+  margin: 0 0 12px 0;
+}
+
+.privacy-link {
+  color: var(--danger);
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-block;
+  margin-bottom: 8px;
+}
+
+.privacy-link:hover {
+  text-decoration: underline;
+}
+
+.privacy-link-small {
+  color: var(--danger);
+  text-decoration: none;
+  font-weight: 600;
+}
+.privacy-link-small:hover {
+  text-decoration: underline;
+}
+
 .settings-form {
   background: var(--surface);
   border: 1px solid var(--border);

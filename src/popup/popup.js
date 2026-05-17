@@ -7,16 +7,20 @@ import { ensureApiHostPermission } from "../shared/permissions.js";
 import { loadSettings, normalizeApiBaseHref, saveSettings } from "../shared/settings.js";
 
 const form = document.getElementById("settingsForm");
+const consentGate = document.getElementById("consentGate");
+const acceptConsentButton = document.getElementById("acceptConsentButton");
+
 const enabledInput = document.getElementById("enabledInput");
 const languageMixInput = document.getElementById("languageMixInput");
 const retrievalCountInput = document.getElementById("retrievalCountInput");
 
 const apiUrlInput = document.getElementById("apiUrlInput");
 const previewInput = document.getElementById("previewInput");
-const consentInput = document.getElementById("consentInput");
 const statusText = document.getElementById("statusText");
 const saveButton = document.getElementById("saveButton");
 const testButton = document.getElementById("testButton");
+
+let currentSettings = null;
 
 initPopup();
 
@@ -25,9 +29,16 @@ async function initPopup() {
   populateRetrievalCounts();
 
   try {
-    const settings = await loadSettings();
-    applySettings(settings);
-    setStatus("Ready");
+    currentSettings = await loadSettings();
+    applySettings(currentSettings);
+    
+    if (!currentSettings.consentAccepted) {
+      showConsentGate();
+      setStatus("Pending Consent");
+    } else {
+      showSettingsForm();
+      setStatus("Ready");
+    }
   } catch {
     setStatus("Settings unavailable");
     setFormDisabled(true);
@@ -41,6 +52,37 @@ async function initPopup() {
   testButton.addEventListener("click", async () => {
     await testApi();
   });
+
+  acceptConsentButton.addEventListener("click", async () => {
+    try {
+      acceptConsentButton.disabled = true;
+      acceptConsentButton.textContent = "Saving...";
+      
+      const newSettings = {
+        ...currentSettings,
+        consentAccepted: true
+      };
+      
+      currentSettings = await saveSettings(newSettings);
+      
+      showSettingsForm();
+      setStatus("Ready");
+    } catch (error) {
+      setStatus("Error saving consent");
+      acceptConsentButton.disabled = false;
+      acceptConsentButton.textContent = "Accept & Continue";
+    }
+  });
+}
+
+function showConsentGate() {
+  consentGate.style.display = "flex";
+  form.style.display = "none";
+}
+
+function showSettingsForm() {
+  consentGate.style.display = "none";
+  form.style.display = "grid";
 }
 
 function populateLanguageMixes() {
@@ -68,7 +110,6 @@ function applySettings(settings) {
 
   apiUrlInput.value = settings.apiUrl;
   previewInput.checked = settings.showPreviewBeforeSending;
-  consentInput.checked = settings.consentAccepted;
 }
 
 async function saveForm() {
@@ -76,14 +117,19 @@ async function saveForm() {
   saveButton.disabled = true;
 
   try {
-    const settings = collectFormSettings();
+    const formValues = collectFormSettings();
+    const settings = {
+      ...currentSettings,
+      ...formValues
+    };
+
     const permissionGranted = await ensureApiHostPermission(settings.apiUrl);
     if (!permissionGranted) {
       throw new Error("Chrome permission was not granted for this API host.");
     }
 
-    const saved = await saveSettings(settings);
-    applySettings(saved);
+    currentSettings = await saveSettings(settings);
+    applySettings(currentSettings);
     setStatus("Saved");
     
     const originalText = saveButton.textContent;
@@ -107,13 +153,13 @@ async function testApi() {
   testButton.disabled = true;
 
   try {
-    const settings = collectFormSettings();
-    const permissionGranted = await ensureApiHostPermission(settings.apiUrl);
+    const formValues = collectFormSettings();
+    const permissionGranted = await ensureApiHostPermission(formValues.apiUrl);
     if (!permissionGranted) {
       throw new Error("Chrome permission was not granted for this API host.");
     }
 
-    const health = await checkApiHealth({ apiUrl: settings.apiUrl });
+    const health = await checkApiHealth({ apiUrl: formValues.apiUrl });
     setStatus(health.model_loaded === false ? "API running, model not loaded" : "API healthy");
   } catch (error) {
     setStatus(error.message || "API test failed");
@@ -130,7 +176,6 @@ function collectFormSettings() {
     messageRetrievalCount: retrievalCountInput.value,
     apiUrl: normalizeApiBaseHref(apiUrlInput.value),
     showPreviewBeforeSending: previewInput.checked,
-    consentAccepted: consentInput.checked,
   };
 }
 

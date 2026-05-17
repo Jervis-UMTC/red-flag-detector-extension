@@ -21,7 +21,17 @@
         </span>
       </header>
 
-      <form id="settingsForm" class="settings-form">
+      <div id="consentGate" class="consent-gate" style="display: none;">
+        <div class="consent-content">
+          <h2>Welcome!</h2>
+          <p>Before using the Red Flag Detector, please review and accept our Privacy Policy.</p>
+          <p>We process your chat context locally and through our API <strong>only</strong> when you click "Analyze". We do not store your data.</p>
+          <a href="privacy.html" class="privacy-link">Read Full Privacy Policy</a>
+        </div>
+        <button id="acceptConsentButton" type="button" class="button button-primary" style="width: 100%;">Accept & Continue</button>
+      </div>
+
+      <form id="settingsForm" class="settings-form" style="display: none;">
         <label class="switch-row">
           <div class="toggle-wrapper">
             <input id="enabledInput" type="checkbox" class="toggle-checkbox">
@@ -59,18 +69,6 @@
           </span>
         </label>
 
-        <label class="switch-row">
-          <div class="toggle-wrapper">
-            <input id="consentInput" type="checkbox" class="toggle-checkbox">
-            <span class="toggle-slider"></span>
-          </div>
-          <span class="switch-text">
-            <strong>Consent to manual scans</strong>
-            <small>Recent chat text is sent to the configured API only when Analyze is clicked.</small>
-          </span>
-        </label>
-
-
         <div class="button-row">
           <button id="saveButton" type="submit" class="button button-primary">Save</button>
           <button id="testButton" type="button" class="button button-secondary">Test API</button>
@@ -78,7 +76,8 @@
       </form>
 
       <p class="fine-print">
-        Output is model-generated and advisory. It is not proof of harm or professional advice.
+        Output is model-generated and advisory. It is not proof of harm or professional advice. <br>
+        <a href="privacy.html" class="privacy-link-small">Privacy Policy</a>
       </p>
     </main>
 
