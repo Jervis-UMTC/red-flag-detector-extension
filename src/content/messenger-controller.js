@@ -3,6 +3,7 @@ import { normalizeMessages } from "../shared/normalization.js";
 import { loadSettings, saveSettings } from "../shared/settings.js";
 
 const HOST_ID = "ph-red-flag-detector-root";
+const SVG_NS = "http://www.w3.org/2000/svg";
 const MAX_VISIBLE_CANDIDATES = 80;
 const NO_MESSAGES_TEXT = "No readable recent messages found in the visible conversation.";
 const MONTH_NAMES = "jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december";
@@ -59,8 +60,14 @@ export function collectVisibleMessengerMessages(doc = document) {
   const mainTitle = conversationTitles.length > 0 ? conversationTitles[0] : "Other";
   const selectors = [
     '[role="main"] [dir="auto"]',
+    '[role="main"] [role="row"]',
+    '[role="main"] [aria-label*="sent" i]',
     '[aria-label="Messages" i] [dir="auto"]',
+    '[aria-label="Messages" i] [role="row"]',
     '[aria-label*="message" i] [dir="auto"]',
+    '[aria-label*="message" i] [role="row"]',
+    '[data-testid*="message" i] [dir="auto"]',
+    '[data-testid*="message" i]',
     'div[data-pagelet*="Messenger" i] [dir="auto"]',
   ];
 
@@ -138,13 +145,7 @@ class MessengerDetectorApp {
     header.className = "rfd-header";
     const titleContainer = document.createElement("div");
     titleContainer.className = "rfd-title-group";
-    titleContainer.innerHTML = `
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
-        <line x1="4" y1="22" x2="4" y2="15"></line>
-      </svg>
-      <strong>PH Red Flag Detector</strong>
-    `;
+    titleContainer.append(createFlagIcon(), createTextElement("strong", "PH Red Flag Detector"));
     header.append(titleContainer);
     
     const headerRight = document.createElement("div");
@@ -157,9 +158,7 @@ class MessengerDetectorApp {
     const collapseBtn = document.createElement("button");
     collapseBtn.className = "rfd-button-quiet";
     collapseBtn.setAttribute("aria-label", this.state.collapsed ? "Expand panel" : "Collapse panel");
-    collapseBtn.innerHTML = this.state.collapsed 
-      ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>'
-      : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+    collapseBtn.append(createChevronIcon(this.state.collapsed ? "up" : "down"));
     collapseBtn.addEventListener("click", () => this.setState({ collapsed: !this.state.collapsed }));
     
     headerRight.append(statusText, collapseBtn);
@@ -198,12 +197,7 @@ class MessengerDetectorApp {
 
     const analyzeButton = createButton("", "primary", () => this.startAnalysis());
     if (this.state.busy) {
-      analyzeButton.innerHTML = `
-        <svg class="rfd-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-        </svg>
-        Checking...
-      `;
+      analyzeButton.replaceChildren(createSpinnerIcon(), document.createTextNode("Checking..."));
     } else {
       analyzeButton.textContent = "Analyze";
     }
@@ -444,6 +438,63 @@ function formatFormatterUsed(formatterUsed) {
   }
 
   return normalized.replaceAll("_", " ");
+}
+
+function createFlagIcon() {
+  const svg = createSvgElement("svg", {
+    width: "16",
+    height: "16",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "#dc2626",
+    "stroke-width": "2.5",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+  });
+  svg.append(
+    createSvgElement("path", { d: "M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" }),
+    createSvgElement("line", { x1: "4", y1: "22", x2: "4", y2: "15" })
+  );
+  return svg;
+}
+
+function createChevronIcon(direction) {
+  const svg = createSvgElement("svg", {
+    width: "18",
+    height: "18",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2.5",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+  });
+  svg.append(createSvgElement("polyline", {
+    points: direction === "up" ? "18 15 12 9 6 15" : "6 9 12 15 18 9",
+  }));
+  return svg;
+}
+
+function createSpinnerIcon() {
+  const svg = createSvgElement("svg", {
+    class: "rfd-spinner",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "3",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+  });
+  svg.append(createSvgElement("path", { d: "M21 12a9 9 0 1 1-6.219-8.56" }));
+  return svg;
+}
+
+function createSvgElement(tagName, attributes) {
+  const element = document.createElementNS(SVG_NS, tagName);
+  for (const [name, value] of Object.entries(attributes)) {
+    element.setAttribute(name, value);
+  }
+  return element;
 }
 
 function createTextElement(tagName, text, className = "") {
@@ -806,6 +857,10 @@ function isPotentialMessengerTextElement(element, text) {
     return false;
   }
 
+  if (!element.matches('[dir="auto"]') && getLeafAutoTexts(element).length > 1) {
+    return false;
+  }
+
   const rect = getUsableRect(element);
   if (rect.width < 8 || rect.height < 8) {
     return false;
@@ -828,10 +883,11 @@ export function filterMessengerTextItems(items, options = {}) {
     .filter((item) => !blockedExactTexts.has(item.text.toLowerCase()))
     .filter((item) => isTextItemInsideRect(item, options.conversationRect))
     .sort((a, b) => numberOrZero(a.top) - numberOrZero(b.top) || numberOrZero(a.left) - numberOrZero(b.left));
+  const dedupedItems = dedupeMessengerTextItems(sortedItems);
   const filteredItems = [];
   let pendingReplyContext = null;
 
-  for (const item of sortedItems) {
+  for (const item of dedupedItems) {
     if (isLikelyMessengerMetadataText(item.text)) {
       if (isLikelyReplyContextText(item.text)) {
         pendingReplyContext = item;
@@ -853,6 +909,20 @@ export function filterMessengerTextItems(items, options = {}) {
   }
 
   return filteredItems;
+}
+
+export function dedupeMessengerTextItems(items) {
+  const keptItems = [];
+
+  for (const item of items) {
+    if (keptItems.some((keptItem) => isDuplicateTextItem(keptItem, item))) {
+      continue;
+    }
+
+    keptItems.push(item);
+  }
+
+  return keptItems;
 }
 
 export function isLikelyMessengerMetadataText(text) {
@@ -995,6 +1065,42 @@ function isTextItemInsideRect(item, rect) {
     centerX <= rectRight(rect) &&
     centerY >= numberOrZero(rect.top) &&
     centerY <= rectBottom(rect);
+}
+
+function isDuplicateTextItem(first, second) {
+  if (normalizeDomText(first.text).toLowerCase() !== normalizeDomText(second.text).toLowerCase()) {
+    return false;
+  }
+
+  if (Boolean(first.isOutgoing) !== Boolean(second.isOutgoing)) {
+    return false;
+  }
+
+  const topGap = Math.abs(numberOrZero(first.top) - numberOrZero(second.top));
+  const leftGap = Math.abs(numberOrZero(first.left) - numberOrZero(second.left));
+  const verticalTolerance = Math.max(20, Math.min(48, Math.max(numberOrZero(first.height), numberOrZero(second.height))));
+
+  if (topGap > verticalTolerance) {
+    return false;
+  }
+
+  return leftGap <= 28 || rectsOverlap(first, second);
+}
+
+function rectsOverlap(first, second) {
+  const firstLeft = numberOrZero(first.left);
+  const firstRight = rectRight(first);
+  const firstTop = numberOrZero(first.top);
+  const firstBottom = rectBottom(first);
+  const secondLeft = numberOrZero(second.left);
+  const secondRight = rectRight(second);
+  const secondTop = numberOrZero(second.top);
+  const secondBottom = rectBottom(second);
+
+  return firstLeft <= secondRight &&
+    firstRight >= secondLeft &&
+    firstTop <= secondBottom &&
+    firstBottom >= secondTop;
 }
 
 function hasUsableDimensions(rect) {

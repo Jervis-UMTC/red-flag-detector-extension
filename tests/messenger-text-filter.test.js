@@ -179,6 +179,25 @@ test("filterMessengerTextItems drops known conversation title text from headers"
   );
 });
 
-function item(text, top, left, isOutgoing) {
-  return { text, top, left, width: text.length * 8, height: 24, isOutgoing };
+test("filterMessengerTextItems drops duplicate wrapper and child text candidates", () => {
+  const filtered = filterMessengerTextItems([
+    item("Kumusta ka?", 120, 420, true, { width: 140, height: 36 }),
+    item("Kumusta ka?", 126, 432, true, { width: 110, height: 22 }),
+    item("Okay ra", 170, 82, false, { width: 84, height: 30 }),
+    item("Okay ra", 176, 94, false, { width: 64, height: 20 }),
+    item("Kumusta ka?", 252, 420, true, { width: 140, height: 36 }),
+  ]);
+
+  assert.deepEqual(
+    filtered.map((message) => ({ text: message.text, top: message.top, isOutgoing: message.isOutgoing })),
+    [
+      { text: "Kumusta ka?", top: 120, isOutgoing: true },
+      { text: "Okay ra", top: 170, isOutgoing: false },
+      { text: "Kumusta ka?", top: 252, isOutgoing: true },
+    ]
+  );
+});
+
+function item(text, top, left, isOutgoing, overrides = {}) {
+  return { text, top, left, width: text.length * 8, height: 24, isOutgoing, ...overrides };
 }
