@@ -2,6 +2,7 @@ import { REQUEST_TIMEOUT_MS } from "./constants.js";
 import { buildMessageWindows, buildPredictionPayload } from "./normalization.js";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const KNOWN_ENDPOINTS = new Set(["health", "predict"]);
 
 export class RedFlagApiError extends Error {
   constructor(message, code = "API_ERROR") {
@@ -29,8 +30,16 @@ export function validateApiBaseUrl(apiUrl) {
   return url;
 }
 
+export function normalizeApiBaseUrl(apiUrl) {
+  const url = toHuggingFaceRuntimeUrl(validateApiBaseUrl(apiUrl));
+  removeKnownEndpointSuffix(url);
+  url.search = "";
+  url.hash = "";
+  return url;
+}
+
 export function resolveEndpointUrl(apiUrl, endpoint) {
-  const url = validateApiBaseUrl(apiUrl);
+  const url = normalizeApiBaseUrl(apiUrl);
   const cleanEndpoint = String(endpoint).replace(/^\/+|\/+$/g, "");
   const normalizedPath = url.pathname.replace(/\/+$/g, "");
 
@@ -182,6 +191,13 @@ async function postOrGetJson({ fetchImpl, url, timeoutMs }) {
 
 async function parseJsonResponse(response) {
   if (!response?.ok) {
+    if (response?.status === 404) {
+      throw new RedFlagApiError(
+        "API endpoint was not found (404). Check the API base URL in settings.",
+        "HTTP_NOT_FOUND"
+      );
+    }
+
     const status = Number.isInteger(response?.status) ? ` (${response.status})` : "";
     throw new RedFlagApiError(`API request failed${status}. Try again later.`, "HTTP_ERROR");
   }
@@ -249,6 +265,33 @@ function normalizeWarnings(value) {
   }
 
   return value.map(cleanText).filter(Boolean);
+}
+
+function toHuggingFaceRuntimeUrl(url) {
+  if (url.hostname !== "huggingface.co") {
+    return url;
+  }
+
+  const [resourceType, owner, space] = url.pathname.split("/").filter(Boolean);
+  if (resourceType !== "spaces" || !owner || !space) {
+    return url;
+  }
+
+  const subdomain = `${owner}-${space}`.toLowerCase().replaceAll("_", "-");
+  if (!/^[a-z0-9-]+$/u.test(subdomain)) {
+    return url;
+  }
+
+  return new URL(`https://${subdomain}.hf.space`);
+}
+
+function removeKnownEndpointSuffix(url) {
+  const pathSegments = url.pathname.split("/").filter(Boolean);
+  while (KNOWN_ENDPOINTS.has(pathSegments.at(-1))) {
+    pathSegments.pop();
+  }
+
+  url.pathname = pathSegments.length > 0 ? `/${pathSegments.join("/")}` : "/";
 }
 
 function redRiskScore(result) {

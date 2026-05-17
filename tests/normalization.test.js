@@ -24,8 +24,8 @@ test("normalizeLanguageMix falls back for unknown values", () => {
 test("normalizeFormatterMode accepts API-supported formatter modes", () => {
   assert.equal(normalizeFormatterMode("auto"), "auto");
   assert.equal(normalizeFormatterMode("deterministic"), "deterministic");
-  assert.equal(normalizeFormatterMode("advanced_llm"), "advanced_llm");
-  assert.equal(normalizeFormatterMode("ADVANCED_LLM"), "advanced_llm");
+  assert.equal(normalizeFormatterMode("google_llm"), "google_llm");
+  assert.equal(normalizeFormatterMode("GOOGLE_LLM"), "google_llm");
 });
 
 test("normalizeFormatterMode falls back to auto for unknown values", () => {
@@ -81,7 +81,7 @@ test("normalizeMessages maps outgoing messages to speaker A and incoming message
 test("buildPredictionPayload returns an API-ready request body", () => {
   const payload = buildPredictionPayload({
     languageMix: "bislish",
-    formatterMode: "advanced_llm",
+    formatterMode: "google_llm",
     messages: [
       { isOutgoing: true, text: "  Asa ka? " },
       { isOutgoing: false, text: "Naa ko sa school." },
@@ -90,7 +90,7 @@ test("buildPredictionPayload returns an API-ready request body", () => {
 
   assert.deepEqual(payload, {
     language_mix: "bislish",
-    formatter_mode: "advanced_llm",
+    formatter_mode: "google_llm",
     messages: [
       { speaker: "A", text: "Asa ka?" },
       { speaker: "B", text: "Naa ko sa school." },

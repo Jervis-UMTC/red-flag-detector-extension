@@ -38,6 +38,17 @@ test("resolveEndpointUrl appends predict or health endpoints safely", () => {
   );
 });
 
+test("resolveEndpointUrl treats pasted endpoint URLs as API bases", () => {
+  assert.equal(
+    resolveEndpointUrl("https://example.test/predict", "health"),
+    "https://example.test/health"
+  );
+  assert.equal(
+    resolveEndpointUrl("https://example.test/api/health", "predict"),
+    "https://example.test/api/predict"
+  );
+});
+
 test("classifyConversation posts normalized payload without credentials", async () => {
   let request;
   const fetchImpl = async (url, options) => {
@@ -51,7 +62,7 @@ test("classifyConversation posts normalized payload without credentials", async 
       message_count_used: 2,
       probabilities: { green_flag: 0.09, red_flag: 0.91 },
       latency_seconds: 0.1,
-      formatter_used: "advanced_llm",
+      formatter_used: "google_llm",
       windows_scanned: 3,
       selected_window_index: 2,
       dropped_items_count: 1,
@@ -63,7 +74,7 @@ test("classifyConversation posts normalized payload without credentials", async 
   const result = await classifyConversation({
     apiUrl: "https://example.test",
     languageMix: "bislish",
-    formatterMode: "advanced_llm",
+    formatterMode: "google_llm",
     messages: [
       { isOutgoing: true, text: "  Asa ka? " },
       { isOutgoing: false, text: "Naa ko sa school." },
@@ -74,11 +85,11 @@ test("classifyConversation posts normalized payload without credentials", async 
   assert.equal(request.url, "https://example.test/predict");
   assert.equal(request.options.method, "POST");
   assert.equal(request.options.credentials, "omit");
-  assert.equal(JSON.parse(request.options.body).formatter_mode, "advanced_llm");
+  assert.equal(JSON.parse(request.options.body).formatter_mode, "google_llm");
   assert.equal(JSON.parse(request.options.body).messages.length, 2);
   assert.equal(result.label, "red_flag");
   assert.equal(result.risk_level, "high");
-  assert.equal(result.formatter_used, "advanced_llm");
+  assert.equal(result.formatter_used, "google_llm");
   assert.equal(result.windows_scanned, 3);
   assert.equal(result.selected_window_index, 2);
   assert.equal(result.dropped_items_count, 1);
@@ -194,6 +205,23 @@ test("classifyConversationWindows uses one request for six or fewer messages", a
 
   assert.equal(requestCount, 1);
   assert.equal(result.scan_count, 1);
+});
+
+test("classifyConversation explains 404 API errors as URL configuration problems", async () => {
+  await assert.rejects(
+    classifyConversation({
+      apiUrl: "https://example.test/api",
+      languageMix: "bislish",
+      messages: [{ speaker: "A", text: "Hello" }],
+      fetchImpl: async () => jsonResponse({ detail: "Not Found" }, { ok: false, status: 404 }),
+    }),
+    (error) => {
+      assert.equal(error.code, "HTTP_NOT_FOUND");
+      assert.match(error.message, /API endpoint was not found \(404\)/);
+      assert.match(error.message, /API base URL/);
+      return true;
+    }
+  );
 });
 
 test("classifyConversation reports API errors without leaking internals", async () => {
