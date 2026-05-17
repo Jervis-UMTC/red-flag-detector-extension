@@ -1,4 +1,4 @@
-export const DEFAULT_API_BASE_URL = "https://jerbenjems-ph-redflag-detector-api.hf.space";
+export const DEFAULT_API_BASE_URL = "https://jerbenjamess-ph-binary-redflag-xlmroberta.hf.space";
 
 export const DEFAULT_LANGUAGE_MIX = "tagalog_bisaya_english";
 export const DEFAULT_FORMATTER_MODE = "auto";
@@ -16,7 +16,7 @@ export const SUPPORTED_LANGUAGE_MIXES = Object.freeze([
 export const SUPPORTED_FORMATTER_MODES = Object.freeze([
   "auto",
   "deterministic",
-  "advanced_llm",
+  "google_llm",
 ]);
 
 export const MAX_MESSAGES = 6;
