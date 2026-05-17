@@ -1,11 +1,15 @@
 import { checkApiHealth } from "../shared/api-client.js";
-import { SUPPORTED_FORMATTER_MODES, SUPPORTED_LANGUAGE_MIXES } from "../shared/constants.js";
+import {
+  SUPPORTED_LANGUAGE_MIXES,
+  SUPPORTED_RETRIEVAL_MESSAGE_COUNTS,
+} from "../shared/constants.js";
 import { ensureApiHostPermission } from "../shared/permissions.js";
 import { loadSettings, normalizeApiBaseHref, saveSettings } from "../shared/settings.js";
 
 const form = document.getElementById("settingsForm");
 const enabledInput = document.getElementById("enabledInput");
 const languageMixInput = document.getElementById("languageMixInput");
+const retrievalCountInput = document.getElementById("retrievalCountInput");
 
 const apiUrlInput = document.getElementById("apiUrlInput");
 const previewInput = document.getElementById("previewInput");
@@ -18,7 +22,7 @@ initPopup();
 
 async function initPopup() {
   populateLanguageMixes();
-
+  populateRetrievalCounts();
 
   try {
     const settings = await loadSettings();
@@ -48,10 +52,19 @@ function populateLanguageMixes() {
   }
 }
 
+function populateRetrievalCounts() {
+  for (const count of SUPPORTED_RETRIEVAL_MESSAGE_COUNTS) {
+    const option = document.createElement("option");
+    option.value = String(count);
+    option.textContent = `Context ${count}`;
+    retrievalCountInput.append(option);
+  }
+}
 
 function applySettings(settings) {
   enabledInput.checked = settings.enabled;
   languageMixInput.value = settings.languageMix;
+  retrievalCountInput.value = String(settings.messageRetrievalCount);
 
   apiUrlInput.value = settings.apiUrl;
   previewInput.checked = settings.showPreviewBeforeSending;
@@ -114,6 +127,7 @@ function collectFormSettings() {
     enabled: enabledInput.checked,
     languageMix: languageMixInput.value,
     formatterMode: "auto",
+    messageRetrievalCount: retrievalCountInput.value,
     apiUrl: normalizeApiBaseHref(apiUrlInput.value),
     showPreviewBeforeSending: previewInput.checked,
     consentAccepted: consentInput.checked,
