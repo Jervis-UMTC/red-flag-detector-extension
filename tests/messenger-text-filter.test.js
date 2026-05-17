@@ -2,9 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildAnchoredContextWindow,
+  countOrderedMessageOverlap,
+  getSelectedPreviewMessages,
   filterMessengerTextItems,
   isLikelyMessengerMetadataText,
   isLikelyReplyPreviewText,
+  mergeOlderMessageSnapshot,
+  mergeNewerMessageSnapshot,
+  togglePreviewSelectionIndex,
 } from "../src/content/messenger-controller.js";
 
 test("isLikelyMessengerMetadataText rejects Messenger timestamp-only text", () => {
@@ -198,6 +204,116 @@ test("filterMessengerTextItems drops duplicate wrapper and child text candidates
   );
 });
 
+test("togglePreviewSelectionIndex keeps selected messages in conversation order", () => {
+  let selectedIndexes = [];
+  selectedIndexes = togglePreviewSelectionIndex(selectedIndexes, 2, 4);
+  selectedIndexes = togglePreviewSelectionIndex(selectedIndexes, 0, 4);
+  selectedIndexes = togglePreviewSelectionIndex(selectedIndexes, 1, 4);
+
+  assert.deepEqual(selectedIndexes, [0, 1, 2]);
+  assert.deepEqual(
+    getSelectedPreviewMessages(
+      [
+        { text: "first" },
+        { text: "second" },
+        { text: "third" },
+        { text: "fourth" },
+      ],
+      selectedIndexes
+    ).map((message) => message.text),
+    ["first", "second", "third"]
+  );
+});
+
+test("togglePreviewSelectionIndex removes selected messages without changing remaining order", () => {
+  const selectedIndexes = togglePreviewSelectionIndex([0, 1, 2], 1, 4);
+
+  assert.deepEqual(selectedIndexes, [0, 2]);
+});
+
+test("mergeOlderMessageSnapshot prepends older scroll batches and removes overlap", () => {
+  const existing = [
+    previewMessage("A", "message 5"),
+    previewMessage("B", "message 6"),
+    previewMessage("A", "message 7"),
+  ];
+  const older = [
+    previewMessage("A", "message 1"),
+    previewMessage("B", "message 2"),
+    previewMessage("A", "message 3"),
+    previewMessage("B", "message 4"),
+    previewMessage("A", "message 5"),
+    previewMessage("B", "message 6"),
+  ];
+
+  assert.equal(countOrderedMessageOverlap(older, existing), 2);
+  assert.deepEqual(
+    mergeOlderMessageSnapshot(existing, older).map((message) => message.text),
+    ["message 1", "message 2", "message 3", "message 4", "message 5", "message 6", "message 7"]
+  );
+});
+
+test("mergeOlderMessageSnapshot preserves repeated message text when sequence is distinct", () => {
+  const existing = [
+    previewMessage("A", "ok"),
+    previewMessage("B", "ok"),
+    previewMessage("A", "see you"),
+  ];
+  const older = [
+    previewMessage("B", "ok"),
+    previewMessage("A", "later"),
+  ];
+
+  assert.equal(countOrderedMessageOverlap(older, existing), 0);
+  assert.deepEqual(
+    mergeOlderMessageSnapshot(existing, older).map((message) => `${message.speaker}:${message.text}`),
+    ["B:ok", "A:later", "A:ok", "B:ok", "A:see you"]
+  );
+});
+
+test("mergeNewerMessageSnapshot appends newer scroll batches and removes overlap", () => {
+  const existing = [
+    previewMessage("A", "message 4"),
+    previewMessage("B", "message 5"),
+    previewMessage("A", "message 6"),
+  ];
+  const newer = [
+    previewMessage("B", "message 5"),
+    previewMessage("A", "message 6"),
+    previewMessage("B", "message 7"),
+    previewMessage("A", "message 8"),
+  ];
+
+  assert.deepEqual(
+    mergeNewerMessageSnapshot(existing, newer).map((message) => message.text),
+    ["message 4", "message 5", "message 6", "message 7", "message 8"]
+  );
+});
+
+test("buildAnchoredContextWindow keeps the backread viewport centered in the scan context", () => {
+  const messages = Array.from({ length: 12 }, (_value, index) => previewMessage(index % 2 === 0 ? "A" : "B", `message ${index + 1}`));
+  const anchorMessages = messages.slice(5, 8);
+
+  assert.deepEqual(
+    buildAnchoredContextWindow(messages, anchorMessages, 7).map((message) => message.text),
+    ["message 4", "message 5", "message 6", "message 7", "message 8", "message 9", "message 10"]
+  );
+});
+
+test("buildAnchoredContextWindow prefers current viewport over latest messages", () => {
+  const messages = Array.from({ length: 20 }, (_value, index) => previewMessage(index % 2 === 0 ? "A" : "B", `message ${index + 1}`));
+  const anchorMessages = messages.slice(2, 5);
+
+  assert.deepEqual(
+    buildAnchoredContextWindow(messages, anchorMessages, 8).map((message) => message.text),
+    ["message 1", "message 2", "message 3", "message 4", "message 5", "message 6", "message 7", "message 8"]
+  );
+});
+
 function item(text, top, left, isOutgoing, overrides = {}) {
   return { text, top, left, width: text.length * 8, height: 24, isOutgoing, ...overrides };
+}
+
+function previewMessage(speaker, text) {
+  return { speaker, text, isOutgoing: speaker === "A" };
 }

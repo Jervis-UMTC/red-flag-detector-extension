@@ -1,10 +1,17 @@
-import { MAX_ANALYSIS_MESSAGES, MESSAGE_TYPES, RISK_COPY } from "../shared/constants.js";
-import { normalizeMessages } from "../shared/normalization.js";
+import {
+  DEFAULT_RETRIEVAL_MESSAGE_COUNT,
+  MESSAGE_TYPES,
+  RISK_COPY,
+  SUPPORTED_RETRIEVAL_MESSAGE_COUNTS,
+} from "../shared/constants.js";
+import { normalizeMessages, normalizeRetrievalMessageCount } from "../shared/normalization.js";
 import { loadSettings, saveSettings } from "../shared/settings.js";
 
 const HOST_ID = "ph-red-flag-detector-root";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MAX_VISIBLE_CANDIDATES = 80;
+const MAX_RETRIEVAL_SCROLL_ATTEMPTS = 6;
+const RETRIEVAL_SCROLL_DELAY_MS = 450;
 const NO_MESSAGES_TEXT = "No readable recent messages found in the visible conversation.";
 const MONTH_NAMES = "jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december";
 const WEEKDAY_NAMES = "mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday";
@@ -52,7 +59,7 @@ export async function mountMessengerDetector() {
   await app.mount();
 }
 
-export function collectVisibleMessengerMessages(doc = document) {
+export function collectVisibleMessengerMessages(doc = document, options = {}) {
   const root = findConversationRoot(doc);
   const rootRect = getUsableRect(root);
   const conversationRect = inferConversationColumnRect(doc, root, rootRect);
@@ -111,8 +118,217 @@ export function collectVisibleMessengerMessages(doc = document) {
     left: item.left,
   }));
 
-  const maxMessages = Math.min(MAX_ANALYSIS_MESSAGES, MAX_VISIBLE_CANDIDATES);
+  const maxMessages = Math.min(normalizeRetrievalMessageCount(options.maxMessages), MAX_VISIBLE_CANDIDATES);
   return candidates.slice(-maxMessages);
+}
+
+export async function collectMessengerMessages(doc = document, options = {}) {
+  const maxMessages = Math.min(normalizeRetrievalMessageCount(options.maxMessages), MAX_VISIBLE_CANDIDATES);
+  const anchorMessages = collectVisibleMessengerMessages(doc, { maxMessages });
+  let messages = anchorMessages;
+
+  if (messages.length >= maxMessages) {
+    return messages;
+  }
+
+  const root = findConversationRoot(doc);
+  const scroller = findConversationScroller(doc, root);
+  const scrollState = getScrollState(scroller, doc);
+
+  if (!scroller || !canScrollUp(scroller, doc)) {
+    return messages;
+  }
+
+  const maxAttempts = Math.max(1, options.scrollAttempts ?? MAX_RETRIEVAL_SCROLL_ATTEMPTS);
+
+  try {
+    messages = await collectOlderContextMessages(doc, scroller, messages, maxMessages, maxAttempts, options);
+    restoreScrollState(scrollState, doc);
+
+    if (messages.length < maxMessages && canScrollDown(scroller, doc)) {
+      messages = await collectNewerContextMessages(doc, scroller, messages, maxMessages, maxAttempts, options);
+    }
+  } finally {
+    restoreScrollState(scrollState, doc);
+  }
+
+  return buildAnchoredContextWindow(messages, anchorMessages, maxMessages);
+}
+
+async function collectOlderContextMessages(doc, scroller, initialMessages, maxMessages, maxAttempts, options = {}) {
+  let messages = initialMessages;
+
+  for (let attempt = 0; attempt < maxAttempts && messages.length < maxMessages; attempt += 1) {
+    const previousPosition = getScrollPosition(scroller, doc);
+    scrollConversationUp(scroller, doc);
+    await sleep(options.scrollDelayMs ?? RETRIEVAL_SCROLL_DELAY_MS);
+
+    const nextPosition = getScrollPosition(scroller, doc);
+    const olderMessages = collectVisibleMessengerMessages(doc, { maxMessages });
+    messages = mergeOlderMessageSnapshot(messages, olderMessages);
+
+    if (nextPosition <= 0 || Math.abs(previousPosition - nextPosition) < 2) {
+      break;
+    }
+  }
+
+  return messages;
+}
+
+async function collectNewerContextMessages(doc, scroller, initialMessages, maxMessages, maxAttempts, options = {}) {
+  let messages = initialMessages;
+
+  for (let attempt = 0; attempt < maxAttempts && messages.length < maxMessages; attempt += 1) {
+    const previousPosition = getScrollPosition(scroller, doc);
+    scrollConversationDown(scroller, doc);
+    await sleep(options.scrollDelayMs ?? RETRIEVAL_SCROLL_DELAY_MS);
+
+    const nextPosition = getScrollPosition(scroller, doc);
+    const newerMessages = collectVisibleMessengerMessages(doc, { maxMessages });
+    messages = mergeNewerMessageSnapshot(messages, newerMessages);
+
+    if (isNearScrollBottom(scroller, doc) || Math.abs(previousPosition - nextPosition) < 2) {
+      break;
+    }
+  }
+
+  return messages;
+}
+
+export function mergeOlderMessageSnapshot(existingMessages, olderVisibleMessages) {
+  const existing = Array.isArray(existingMessages) ? existingMessages : [];
+  const older = Array.isArray(olderVisibleMessages) ? olderVisibleMessages : [];
+
+  if (existing.length === 0) {
+    return older;
+  }
+
+  if (older.length === 0) {
+    return existing;
+  }
+
+  const overlap = countOrderedMessageOverlap(older, existing);
+  return [...older, ...existing.slice(overlap)];
+}
+
+export function mergeNewerMessageSnapshot(existingMessages, newerVisibleMessages) {
+  const existing = Array.isArray(existingMessages) ? existingMessages : [];
+  const newer = Array.isArray(newerVisibleMessages) ? newerVisibleMessages : [];
+
+  if (existing.length === 0) {
+    return newer;
+  }
+
+  if (newer.length === 0) {
+    return existing;
+  }
+
+  const overlap = countOrderedMessageOverlap(existing, newer);
+  return [...existing, ...newer.slice(overlap)];
+}
+
+export function buildAnchoredContextWindow(messages, anchorMessages, maxMessages) {
+  const normalizedMessages = Array.isArray(messages) ? messages : [];
+  const normalizedAnchor = Array.isArray(anchorMessages) ? anchorMessages : [];
+  const maxCount = Math.max(1, Number.isInteger(maxMessages) ? maxMessages : DEFAULT_RETRIEVAL_MESSAGE_COUNT);
+
+  if (normalizedMessages.length <= maxCount) {
+    return normalizedMessages;
+  }
+
+  if (normalizedAnchor.length === 0) {
+    return normalizedMessages.slice(-maxCount);
+  }
+
+  const anchorRange = findAnchorRange(normalizedMessages, normalizedAnchor);
+  if (!anchorRange) {
+    return normalizedMessages.slice(-maxCount);
+  }
+
+  const anchorLength = anchorRange.end - anchorRange.start;
+  if (anchorLength >= maxCount) {
+    return normalizedMessages.slice(anchorRange.end - maxCount, anchorRange.end);
+  }
+
+  const extraCount = maxCount - anchorLength;
+  const preferredBefore = Math.ceil(extraCount / 2);
+  const beforeCount = Math.min(anchorRange.start, preferredBefore);
+  const afterCount = Math.min(normalizedMessages.length - anchorRange.end, extraCount - beforeCount);
+  const remainingBeforeCount = Math.min(anchorRange.start - beforeCount, extraCount - beforeCount - afterCount);
+  const start = anchorRange.start - beforeCount - remainingBeforeCount;
+
+  return normalizedMessages.slice(start, start + maxCount);
+}
+
+export function countOrderedMessageOverlap(leftMessages, rightMessages) {
+  const maxOverlap = Math.min(leftMessages.length, rightMessages.length);
+
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const leftStart = leftMessages.length - overlap;
+    const matches = leftMessages
+      .slice(leftStart)
+      .every((message, index) => previewMessageKey(message) === previewMessageKey(rightMessages[index]));
+
+    if (matches) {
+      return overlap;
+    }
+  }
+
+  return 0;
+}
+
+function findAnchorRange(messages, anchorMessages) {
+  const anchorKeys = anchorMessages.map(previewMessageKey);
+
+  for (let start = 0; start <= messages.length - anchorKeys.length; start += 1) {
+    const matches = anchorKeys.every((key, index) => previewMessageKey(messages[start + index]) === key);
+    if (matches) {
+      return { start, end: start + anchorKeys.length };
+    }
+  }
+
+  return null;
+}
+
+export function createPreviewSelectionIndexes(messages) {
+  return Array.isArray(messages) ? messages.map((_message, index) => index) : [];
+}
+
+export function getSelectedPreviewMessages(messages, selectedIndexes) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  return normalizePreviewSelectionIndexes(selectedIndexes, messages.length)
+    .map((index) => messages[index])
+    .filter(Boolean);
+}
+
+export function togglePreviewSelectionIndex(selectedIndexes, index, totalCount) {
+  const normalizedIndexes = normalizePreviewSelectionIndexes(selectedIndexes, totalCount);
+  if (!Number.isInteger(index) || index < 0 || index >= totalCount) {
+    return normalizedIndexes;
+  }
+
+  if (normalizedIndexes.includes(index)) {
+    return normalizedIndexes.filter((selectedIndex) => selectedIndex !== index);
+  }
+
+  return normalizePreviewSelectionIndexes([...normalizedIndexes, index], totalCount);
+}
+
+function normalizePreviewSelectionIndexes(selectedIndexes, totalCount) {
+  const maxIndex = Math.max(0, Number.isInteger(totalCount) ? totalCount : 0);
+  return Array.from(new Set(Array.isArray(selectedIndexes) ? selectedIndexes : []))
+    .filter((index) => Number.isInteger(index) && index >= 0 && index < maxIndex)
+    .sort((a, b) => a - b);
+}
+
+function previewMessageKey(message) {
+  const speaker = String(message?.speaker ?? "").trim().toLowerCase();
+  const text = String(message?.text ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  const outgoing = message?.isOutgoing === true ? "out" : "in";
+  return `${speaker}:${outgoing}:${text}`;
 }
 
 class MessengerDetectorApp {
@@ -124,6 +340,9 @@ class MessengerDetectorApp {
       result: null,
       error: "",
       previewMessages: null,
+      previewSelectedIndexes: [],
+      previewExpanded: false,
+      retrievalMessageCount: DEFAULT_RETRIEVAL_MESSAGE_COUNT,
       awaitingConsent: false,
       collapsed: false,
     };
@@ -135,6 +354,14 @@ class MessengerDetectorApp {
     this.container.className = "rfd-panel";
     this.container.setAttribute("aria-label", "PH Red Flag Detector");
     this.root.append(this.container);
+
+    try {
+      const settings = await loadSettings();
+      this.state.retrievalMessageCount = settings.messageRetrievalCount;
+    } catch {
+      this.state.retrievalMessageCount = DEFAULT_RETRIEVAL_MESSAGE_COUNT;
+    }
+
     this.render();
   }
 
@@ -181,15 +408,29 @@ class MessengerDetectorApp {
     } else if (this.state.awaitingConsent) {
       body.append(createConsentView(() => this.acceptConsentAndAnalyze(), () => this.cancelPendingFlow()));
     } else if (this.state.previewMessages) {
+      const selectedMessages = getSelectedPreviewMessages(this.state.previewMessages, this.state.previewSelectedIndexes);
       body.append(createPreviewView(
         this.state.previewMessages,
-        () => this.sendMessages(this.state.previewMessages),
+        this.state.previewSelectedIndexes,
+        () => this.sendMessages(selectedMessages),
         () => this.cancelPendingFlow(),
-        (index) => this.removePreviewMessage(index)
+        (index) => this.togglePreviewMessage(index),
+        {
+          expanded: this.state.previewExpanded,
+          onToggleExpanded: () => this.togglePreviewExpanded(),
+          onSelectAll: () => this.selectAllPreviewMessages(),
+          onClearSelection: () => this.clearPreviewSelection(),
+        }
       ));
     } else {
       const message = createTextElement("p", "Manual scan only. Visible messages are sent only after you click analyze.", "rfd-message");
-      body.append(message);
+      body.append(
+        message,
+        createRetrievalCountControl(
+          this.state.retrievalMessageCount,
+          (count) => this.updateRetrievalMessageCount(count)
+        )
+      );
     }
 
     const actions = document.createElement("footer");
@@ -212,7 +453,7 @@ class MessengerDetectorApp {
   }
 
   async startAnalysis() {
-    this.setState({ busy: true, status: "Reading", error: "", result: null, previewMessages: null });
+    this.setState({ busy: true, status: "Reading", error: "", result: null, previewMessages: null, previewSelectedIndexes: [], previewExpanded: false });
 
     try {
       const settings = await loadSettings();
@@ -225,7 +466,8 @@ class MessengerDetectorApp {
         return;
       }
 
-      const messages = collectVisibleMessengerMessages();
+      const messageRetrievalCount = normalizeRetrievalMessageCount(this.state.retrievalMessageCount);
+      const messages = await collectMessengerMessages(document, { maxMessages: messageRetrievalCount });
       if (messages.length === 0) {
         this.setState({ busy: false, status: "No messages", error: NO_MESSAGES_TEXT });
         return;
@@ -238,7 +480,12 @@ class MessengerDetectorApp {
       }
 
       if (settings.showPreviewBeforeSending) {
-        this.setState({ busy: false, status: "Preview", previewMessages: messages });
+        this.setState({
+          busy: false,
+          status: "Preview",
+          previewMessages: messages,
+          previewSelectedIndexes: createPreviewSelectionIndexes(messages),
+        });
         return;
       }
 
@@ -255,7 +502,12 @@ class MessengerDetectorApp {
     this.pendingMessages = null;
 
     if (settings.showPreviewBeforeSending) {
-      this.setState({ awaitingConsent: false, status: "Preview", previewMessages: messages });
+      this.setState({
+        awaitingConsent: false,
+        status: "Preview",
+        previewMessages: messages,
+        previewSelectedIndexes: createPreviewSelectionIndexes(messages),
+      });
       return;
     }
 
@@ -263,7 +515,7 @@ class MessengerDetectorApp {
   }
 
   async sendMessages(messages) {
-    this.setState({ busy: true, status: "Checking", error: "", result: null, previewMessages: null, awaitingConsent: false });
+    this.setState({ busy: true, status: "Checking", error: "", result: null, previewMessages: null, previewSelectedIndexes: [], previewExpanded: false, awaitingConsent: false });
 
     try {
       const settings = await loadSettings();
@@ -287,20 +539,56 @@ class MessengerDetectorApp {
       status: "Ready",
       awaitingConsent: false,
       previewMessages: null,
+      previewSelectedIndexes: [],
+      previewExpanded: false,
       error: "",
     });
   }
 
   resetResult() {
-    this.setState({ status: "Ready", result: null, error: "" });
+    this.setState({ status: "Ready", result: null, error: "", previewSelectedIndexes: [], previewExpanded: false });
   }
 
-  removePreviewMessage(indexToRemove) {
-    const previewMessages = this.state.previewMessages?.filter((_message, index) => index !== indexToRemove) ?? [];
+  togglePreviewMessage(index) {
+    const previewMessages = this.state.previewMessages ?? [];
+    const previewSelectedIndexes = togglePreviewSelectionIndex(
+      this.state.previewSelectedIndexes,
+      index,
+      previewMessages.length
+    );
+
     this.setState({
       status: previewMessages.length > 0 ? "Preview" : "No messages",
-      previewMessages,
+      previewSelectedIndexes,
     });
+  }
+
+  selectAllPreviewMessages() {
+    const previewMessages = this.state.previewMessages ?? [];
+    this.setState({
+      status: previewMessages.length > 0 ? "Preview" : "No messages",
+      previewSelectedIndexes: createPreviewSelectionIndexes(previewMessages),
+    });
+  }
+
+  clearPreviewSelection() {
+    this.setState({ previewSelectedIndexes: [] });
+  }
+
+  async updateRetrievalMessageCount(value) {
+    const retrievalMessageCount = normalizeRetrievalMessageCount(value);
+    this.setState({ retrievalMessageCount });
+
+    try {
+      const settings = await loadSettings();
+      await saveSettings({ ...settings, messageRetrievalCount });
+    } catch {
+      // The in-panel state still applies to the current scan if storage is unavailable.
+    }
+  }
+
+  togglePreviewExpanded() {
+    this.setState({ previewExpanded: !this.state.previewExpanded });
   }
 
   setState(nextState) {
@@ -360,10 +648,59 @@ function createConsentView(onContinue, onCancel) {
   return wrapper;
 }
 
-function createPreviewView(messages, onContinue, onCancel, onRemove) {
+function createRetrievalCountControl(selectedCount, onChange) {
+  const wrapper = document.createElement("label");
+  wrapper.className = "rfd-count-field";
+
+  const labelText = createTextElement("span", "Context to scan", "rfd-count-label");
+  const select = document.createElement("select");
+  select.className = "rfd-count-select";
+  select.setAttribute("aria-label", "Context messages to scan");
+
+  for (const count of SUPPORTED_RETRIEVAL_MESSAGE_COUNTS) {
+    const option = document.createElement("option");
+    option.value = String(count);
+    option.textContent = `Context ${count}`;
+    select.append(option);
+  }
+
+  select.value = String(normalizeRetrievalMessageCount(selectedCount));
+  select.addEventListener("change", () => onChange(select.value));
+  wrapper.append(labelText, select);
+  return wrapper;
+}
+
+function createPreviewView(messages, selectedIndexes, onContinue, onCancel, onToggleMessage, options = {}) {
   const wrapper = document.createElement("div");
-  wrapper.className = "rfd-preview";
-  wrapper.append(createTextElement("p", `Visible messages ready to send (${messages.length})`, "rfd-result-title"));
+  wrapper.className = `rfd-preview${options.expanded ? " rfd-preview-expanded" : ""}`;
+  const selectedIndexSet = new Set(normalizePreviewSelectionIndexes(selectedIndexes, messages.length));
+  const selectedCount = selectedIndexSet.size;
+
+  const header = document.createElement("div");
+  header.className = "rfd-preview-header";
+  const titleGroup = document.createElement("div");
+  titleGroup.className = "rfd-preview-title-group";
+  titleGroup.append(
+    createTextElement("p", "Review messages", "rfd-result-title"),
+    createTextElement("span", `${selectedCount} of ${messages.length} selected`, "rfd-preview-count")
+  );
+  header.append(titleGroup);
+
+  if (messages.length > 0) {
+    const headerActions = document.createElement("div");
+    headerActions.className = "rfd-preview-header-actions";
+    headerActions.append(createButton(selectedCount === messages.length ? "Clear selection" : "Select all", "secondary", (selectedCount === messages.length ? options.onClearSelection : options.onSelectAll) ?? (() => {}), {
+      className: "rfd-preview-toggle",
+    }));
+    headerActions.append(createButton(options.expanded ? "Compact view" : "Larger view", "secondary", options.onToggleExpanded ?? (() => {}), {
+      className: "rfd-preview-toggle",
+      ariaLabel: options.expanded ? "Use compact preview" : "Use larger preview",
+      icon: options.expanded ? createShrinkIcon() : createExpandIcon(),
+    }));
+    header.append(headerActions);
+  }
+
+  wrapper.append(header);
 
   const list = document.createElement("ol");
   list.className = "rfd-preview-list";
@@ -373,26 +710,40 @@ function createPreviewView(messages, onContinue, onCancel, onRemove) {
   }
 
   for (const [index, message] of messages.entries()) {
+    const selected = selectedIndexSet.has(index);
     const item = document.createElement("li");
-    item.className = "rfd-preview-item";
+    item.className = `rfd-preview-item${selected ? " rfd-preview-item-selected" : ""}`;
+
+    const toggleButton = document.createElement("button");
+    toggleButton.type = "button";
+    toggleButton.className = "rfd-preview-choice";
+    toggleButton.setAttribute("role", "checkbox");
+    toggleButton.setAttribute("aria-checked", String(selected));
+    toggleButton.setAttribute("aria-label", `${selected ? "Exclude" : "Include"} message ${index + 1} from ${message.speaker}`);
+    toggleButton.addEventListener("click", () => onToggleMessage(index));
+
+    const selectionIcon = document.createElement("span");
+    selectionIcon.className = "rfd-preview-check";
+    selectionIcon.append(selected ? createCheckIcon() : createPlusIcon());
+
+    const messageIndex = createTextElement("span", String(index + 1), "rfd-preview-index");
+    messageIndex.setAttribute("aria-hidden", "true");
 
     const messageBody = document.createElement("span");
     messageBody.className = "rfd-preview-text";
-    messageBody.append(createTextElement("span", `${message.speaker}: `, "rfd-speaker"));
+    messageBody.append(createTextElement("span", message.speaker, "rfd-speaker"));
     messageBody.append(document.createTextNode(message.text));
 
-    const removeButton = createButton("x", "quiet", () => onRemove(index), {
-      ariaLabel: `Remove message ${index + 1}`,
-      className: "rfd-remove-button",
-    });
+    const stateText = createTextElement("span", selected ? "Included" : "Skipped", "rfd-preview-state");
 
-    item.append(messageBody, removeButton);
+    toggleButton.append(selectionIcon, messageIndex, messageBody, stateText);
+    item.append(toggleButton);
     list.append(item);
   }
 
   const actions = document.createElement("div");
   actions.className = "rfd-inline-actions";
-  actions.append(createButton("Send", "primary", onContinue, { disabled: messages.length === 0 }));
+  actions.append(createButton("Send", "primary", onContinue, { disabled: selectedCount === 0 }));
   actions.append(createButton("Cancel", "secondary", onCancel));
 
   if (messages.length > 0) {
@@ -406,12 +757,17 @@ function createButton(label, variant, onClick, options = {}) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `rfd-button rfd-button-${variant}${options.className ? ` ${options.className}` : ""}`;
-  button.textContent = label;
+  if (options.icon) {
+    button.append(options.icon);
+  }
+  if (label) {
+    button.append(document.createTextNode(label));
+  }
   if (options.ariaLabel) {
     button.setAttribute("aria-label", options.ariaLabel);
   }
   button.disabled = options.disabled === true;
-  button.addEventListener("click", onClick);
+  button.addEventListener("click", onClick ?? (() => {}));
   return button;
 }
 
@@ -489,6 +845,60 @@ function createSpinnerIcon() {
   return svg;
 }
 
+function createExpandIcon() {
+  const svg = createPreviewToolIcon();
+  svg.append(
+    createSvgElement("polyline", { points: "15 3 21 3 21 9" }),
+    createSvgElement("polyline", { points: "9 21 3 21 3 15" }),
+    createSvgElement("line", { x1: "21", y1: "3", x2: "14", y2: "10" }),
+    createSvgElement("line", { x1: "3", y1: "21", x2: "10", y2: "14" })
+  );
+  return svg;
+}
+
+function createShrinkIcon() {
+  const svg = createPreviewToolIcon();
+  svg.append(
+    createSvgElement("polyline", { points: "14 10 20 10 20 4" }),
+    createSvgElement("polyline", { points: "10 14 4 14 4 20" }),
+    createSvgElement("line", { x1: "20", y1: "10", x2: "13", y2: "3" }),
+    createSvgElement("line", { x1: "4", y1: "14", x2: "11", y2: "21" })
+  );
+  return svg;
+}
+
+function createCheckIcon() {
+  const svg = createPreviewToolIcon();
+  svg.append(
+    createSvgElement("polyline", { points: "20 6 9 17 4 12" })
+  );
+  return svg;
+}
+
+function createPlusIcon() {
+  const svg = createPreviewToolIcon();
+  svg.append(
+    createSvgElement("line", { x1: "12", y1: "5", x2: "12", y2: "19" }),
+    createSvgElement("line", { x1: "5", y1: "12", x2: "19", y2: "12" })
+  );
+  return svg;
+}
+
+function createPreviewToolIcon() {
+  return createSvgElement("svg", {
+    class: "rfd-button-icon",
+    width: "14",
+    height: "14",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2.5",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+  });
+}
+
 function createSvgElement(tagName, attributes) {
   const element = document.createElementNS(SVG_NS, tagName);
   for (const [name, value] of Object.entries(attributes)) {
@@ -560,6 +970,36 @@ function createStyle() {
     .rfd-message {
       margin: 0;
       color: #334155;
+    }
+
+    .rfd-count-field {
+      align-items: center;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      margin-top: 12px;
+    }
+
+    .rfd-count-label {
+      color: #475569;
+      font-weight: 700;
+      min-width: 0;
+    }
+
+    .rfd-count-select {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      color: #1e293b;
+      font: inherit;
+      min-height: 34px;
+      padding: 0 10px;
+    }
+
+    .rfd-count-select:focus-visible {
+      outline: none;
+      border-color: #dc2626;
+      box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.4);
     }
 
     .rfd-error {
@@ -644,11 +1084,15 @@ function createStyle() {
     }
 
     .rfd-button {
+      align-items: center;
       border: 1px solid #cbd5e1;
       border-radius: 8px;
       cursor: pointer;
+      display: inline-flex;
       font: inherit;
       font-weight: 600;
+      gap: 6px;
+      justify-content: center;
       min-height: 34px;
       padding: 0 14px;
       transition: all 0.2s ease;
@@ -695,13 +1139,56 @@ function createStyle() {
       border-color: #94a3b8;
     }
 
+    .rfd-button-icon {
+      flex: 0 0 auto;
+    }
+
+    .rfd-preview-header {
+      align-items: flex-start;
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+    }
+
+    .rfd-preview-header-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+
+    .rfd-preview-title-group {
+      min-width: 0;
+    }
+
+    .rfd-preview-count {
+      color: #64748b;
+      display: block;
+      font-size: 12px;
+      line-height: 1.3;
+      margin-top: 2px;
+    }
+
+    .rfd-preview-toggle {
+      flex: 0 0 auto;
+      min-height: 30px;
+      padding: 0 10px;
+      white-space: nowrap;
+    }
+
     .rfd-preview-list {
       margin: 12px 0 0;
-      max-height: 180px;
+      max-height: min(220px, calc(100vh - 300px));
       overflow-y: auto;
       padding-left: 0;
       border: 1px solid #e2e8f0;
       border-radius: 8px;
+      background: #ffffff;
+      scrollbar-gutter: stable;
+    }
+
+    .rfd-preview-expanded .rfd-preview-list {
+      max-height: min(460px, calc(100vh - 220px));
     }
 
     .rfd-preview-list li {
@@ -709,28 +1196,116 @@ function createStyle() {
     }
 
     .rfd-preview-item {
-      align-items: center;
       border-bottom: 1px solid #f1f5f9;
-      display: grid;
-      gap: 12px;
-      grid-template-columns: 1fr auto;
-      list-style-position: inside;
-      padding: 8px 12px;
+      list-style: none;
       background: #ffffff;
+    }
+
+    .rfd-preview-item:nth-child(even) .rfd-preview-choice {
+      background: #f8fafc;
     }
 
     .rfd-preview-item:last-child {
       border-bottom: 0;
     }
 
+    .rfd-preview-choice {
+      align-items: flex-start;
+      background: transparent;
+      border: 0;
+      color: #1e293b;
+      cursor: pointer;
+      display: grid;
+      font: inherit;
+      gap: 10px;
+      grid-template-columns: 22px 24px minmax(0, 1fr) auto;
+      line-height: inherit;
+      padding: 10px 12px;
+      text-align: left;
+      width: 100%;
+    }
+
+    .rfd-preview-choice:hover {
+      background: #f8fafc;
+    }
+
+    .rfd-preview-choice:focus-visible {
+      outline: none;
+      box-shadow: inset 0 0 0 2px rgba(220, 38, 38, 0.45);
+    }
+
+    .rfd-preview-check {
+      align-items: center;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      color: #64748b;
+      display: inline-flex;
+      height: 22px;
+      justify-content: center;
+      margin-top: 1px;
+      width: 22px;
+    }
+
+    .rfd-preview-item-selected .rfd-preview-check {
+      background: #fef2f2;
+      border-color: #fecaca;
+      color: #dc2626;
+    }
+
+    .rfd-preview-index {
+      align-items: center;
+      align-self: flex-start;
+      background: #f1f5f9;
+      border-radius: 999px;
+      color: #64748b;
+      display: inline-flex;
+      font-size: 11px;
+      font-weight: 700;
+      height: 22px;
+      justify-content: center;
+      line-height: 1;
+      margin-top: 1px;
+      min-width: 22px;
+      padding: 0 6px;
+    }
+
     .rfd-preview-text {
+      display: grid;
+      gap: 3px;
       min-width: 0;
-      line-height: 1.4;
+      line-height: 1.45;
+    }
+
+    .rfd-preview-item:not(.rfd-preview-item-selected) .rfd-preview-text {
+      color: #64748b;
     }
 
     .rfd-speaker {
       color: #64748b;
+      display: block;
+      font-size: 11px;
       font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .rfd-preview-state {
+      align-self: flex-start;
+      border: 1px solid #e2e8f0;
+      border-radius: 999px;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      margin-top: 1px;
+      padding: 5px 8px;
+      white-space: nowrap;
+    }
+
+    .rfd-preview-item-selected .rfd-preview-state {
+      background: #fef2f2;
+      border-color: #fecaca;
+      color: #b91c1c;
     }
 
     .rfd-button-quiet {
@@ -750,12 +1325,6 @@ function createStyle() {
     .rfd-button-quiet:hover:not(:disabled) {
       background: #f1f5f9;
       color: #dc2626;
-    }
-
-    .rfd-remove-button {
-      line-height: 1;
-      font-size: 14px;
-      font-weight: 700;
     }
 
     .rfd-title-group {
@@ -804,6 +1373,131 @@ function findConversationRoot(doc) {
     doc.querySelector('[aria-label="Messages" i]') ||
     doc.body
   );
+}
+
+function findConversationScroller(doc, root) {
+  const candidates = [
+    root,
+    ...Array.from(root?.querySelectorAll?.("*") ?? []),
+    doc.scrollingElement,
+    doc.documentElement,
+  ];
+  const uniqueCandidates = Array.from(new Set(candidates.filter(Boolean)));
+
+  return uniqueCandidates
+    .map((element) => ({ element, rect: getUsableRect(element), score: scoreScrollerCandidate(element, doc) }))
+    .filter(({ element, score }) => score > 0 && canScrollUp(element, doc))
+    .sort((a, b) => b.score - a.score || numberOrZero(b.rect.height) - numberOrZero(a.rect.height))[0]?.element;
+}
+
+function scoreScrollerCandidate(element, doc) {
+  if (!(element instanceof Element)) {
+    return 0;
+  }
+
+  const rect = getUsableRect(element);
+  const scrollHeight = numberOrZero(element.scrollHeight);
+  const clientHeight = numberOrZero(element.clientHeight);
+  const overflowY = getComputedStyle(element).overflowY;
+  const canScrollVertically = scrollHeight > clientHeight + 40;
+  const allowsScroll = /auto|scroll|overlay/i.test(overflowY) ||
+    numberOrZero(element.scrollTop) > 0 ||
+    element === doc.scrollingElement ||
+    element === doc.documentElement;
+
+  if (!canScrollVertically || !allowsScroll || rect.height < 120 || rect.width < 220) {
+    return 0;
+  }
+
+  const textDensity = element.querySelectorAll?.('[dir="auto"], [role="row"], [aria-label*="sent" i]').length ?? 0;
+  const composer = findMessageComposer(doc, element);
+  const containsComposer = Boolean(composer);
+  const areaScore = Math.min(200, (rect.width * rect.height) / 4000);
+
+  return textDensity * 8 + areaScore - (containsComposer ? 30 : 0);
+}
+
+function getScrollState(scroller, doc) {
+  if (!scroller) {
+    return null;
+  }
+
+  return {
+    scroller,
+    top: getScrollPosition(scroller, doc),
+  };
+}
+
+function restoreScrollState(scrollState, doc) {
+  if (!scrollState?.scroller) {
+    return;
+  }
+
+  setScrollPosition(scrollState.scroller, doc, scrollState.top);
+}
+
+function canScrollUp(scroller, doc) {
+  return getScrollPosition(scroller, doc) > 2;
+}
+
+function canScrollDown(scroller, doc) {
+  return !isNearScrollBottom(scroller, doc);
+}
+
+function scrollConversationUp(scroller, doc) {
+  const currentPosition = getScrollPosition(scroller, doc);
+  const viewportHeight = numberOrZero(scroller?.clientHeight) || doc.defaultView?.innerHeight || 600;
+  const offset = Math.max(280, viewportHeight * 0.85);
+  setScrollPosition(scroller, doc, Math.max(0, currentPosition - offset));
+}
+
+function scrollConversationDown(scroller, doc) {
+  const currentPosition = getScrollPosition(scroller, doc);
+  const viewportHeight = numberOrZero(scroller?.clientHeight) || doc.defaultView?.innerHeight || 600;
+  const offset = Math.max(280, viewportHeight * 0.85);
+  setScrollPosition(scroller, doc, Math.min(getMaxScrollTop(scroller, doc), currentPosition + offset));
+}
+
+function isNearScrollBottom(scroller, doc) {
+  return getMaxScrollTop(scroller, doc) - getScrollPosition(scroller, doc) <= 2;
+}
+
+function getMaxScrollTop(scroller, doc) {
+  if (scroller === doc.scrollingElement || scroller === doc.documentElement || scroller === doc.body) {
+    const body = doc.body;
+    const documentElement = doc.documentElement;
+    const scrollHeight = Math.max(numberOrZero(body?.scrollHeight), numberOrZero(documentElement?.scrollHeight));
+    const viewportHeight = doc.defaultView?.innerHeight ?? numberOrZero(documentElement?.clientHeight);
+    return Math.max(0, scrollHeight - viewportHeight);
+  }
+
+  return Math.max(0, numberOrZero(scroller?.scrollHeight) - numberOrZero(scroller?.clientHeight));
+}
+
+function getScrollPosition(scroller, doc) {
+  if (scroller === doc.scrollingElement || scroller === doc.documentElement || scroller === doc.body) {
+    return doc.defaultView?.scrollY ?? numberOrZero(scroller?.scrollTop);
+  }
+
+  return numberOrZero(scroller?.scrollTop);
+}
+
+function setScrollPosition(scroller, doc, top) {
+  const nextTop = Math.max(0, numberOrZero(top));
+
+  if (scroller === doc.scrollingElement || scroller === doc.documentElement || scroller === doc.body) {
+    doc.defaultView?.scrollTo?.({ top: nextTop, behavior: "auto" });
+    if (scroller) {
+      scroller.scrollTop = nextTop;
+    }
+    return;
+  }
+
+  scroller.scrollTop = nextTop;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
 function inferConversationColumnRect(doc, root, rootRect) {
