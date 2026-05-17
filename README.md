@@ -5,10 +5,11 @@ Manifest V3 Chrome extension that adds a manual red-flag scan action to Facebook
 ## What It Does
 
 - Runs on `messenger.com` and `facebook.com/messages`.
-- Extracts recent visible text messages from the active conversation.
+- Extracts the current visible conversation context, including while backreading.
 - Normalizes speakers as `A` for the user and `B` for the other participant.
-- Shows an editable preview so incorrectly detected lines can be removed before sending.
-- Sends up to the latest 18 clean messages to `/predict`, where the API can scan overlapping classifier windows.
+- Shows an interactive preview so messages can be included or skipped before sending.
+- Retrieves a 5, 10, or 20 message context window for review, anchored on the current backread position.
+- Sends the selected context window once to `/predict`; backend scanning/windowing is handled by the API.
 - Shows label, confidence, risk level, and the API explanation.
 - Shows formatter/window metadata when the API returns it.
 - Stores settings only; raw chat messages are not saved.
@@ -45,6 +46,7 @@ Open the extension popup to configure:
 
 - Enable or pause the Messenger overlay.
 - Language mix.
+- Context to scan.
 
 - API base URL.
 - Preview before sending.
@@ -91,5 +93,5 @@ PowerShell may block `npm.ps1` on this machine, so `npm.cmd` is the safest comma
 - Messenger DOM markup changes frequently, so message extraction is heuristic.
 - Group chat support is not specialized in v1.
 - Attachment-only messages, images, stickers, and voice notes are ignored.
-- Only visible text currently in the page DOM can be scanned.
+- Messenger may still limit older text if the conversation cannot scroll/load more messages in the page.
 - The API is a prototype academic NLP backend, so predictions should be interpreted cautiously.
